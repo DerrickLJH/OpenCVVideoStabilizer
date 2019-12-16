@@ -1,0 +1,3 @@
+include ':app'
+rootProject.name='OpenCVVideoStabilizer'
+include ':openCVLibrary348'
