@@ -2,17 +2,13 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
-        android:id="@+id/black_white"
-        android:title="RGB to Gray"
+        android:id="@+id/og"
+        android:title="Original"
         app:showAsAction="never" />
 
     <item
-        android:id="@+id/hsv"
-        android:title="RGB to HSV"
+        android:id="@+id/stab"
+        android:title="Stabilized"
         app:showAsAction="never" />
 
-    <item
-        android:id="@+id/lab"
-        android:title="RGB to Lab"
-        app:showAsAction="never" />
 </menu>
