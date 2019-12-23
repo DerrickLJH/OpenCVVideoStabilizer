@@ -1,5 +1,7 @@
 package com.example.opencvvideostabilizer;
 
+import org.bytedeco.javacv.FFmpegFrameRecorder;
+import org.bytedeco.javacv.Frame;
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
 import org.opencv.android.JavaCameraView;
@@ -21,43 +23,62 @@ import org.opencv.video.SparseOpticalFlow;
 import org.opencv.video.Video;
 
 import android.app.Activity;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.MediaScannerConnection;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
 import android.view.WindowManager;
+import android.widget.ImageView;
 
-import java.util.List;
-import java.util.Random;
+import androidx.core.graphics.drawable.DrawableCompat;
+
+import com.google.android.material.floatingactionbutton.FloatingActionButton;;
 
 
 public class MainActivity extends Activity implements CvCameraViewListener2 {
-    private static final String TAG = "MainActivity";
-    private static final int VIEW_MODE_KLT_TRACKER = 0;
-    private static final int VIEW_MODE_OPTICAL_FLOW = 1;
+    private static final String LOG_TAG = "MainActivity";
 
-    private Mat mRgba, mGray, mIntermediateMat, mPrevGray;
     private CameraBridgeViewBase mOpenCvCameraView;
-    private int mViewMode;
+    private Mat edgesMat;
+    private final Scalar greenScalar = new Scalar(0,255,0);
 
-    MatOfPoint2f prevFeatures, nextFeatures;
-    MatOfPoint features;
+    private String ffmpeg_link = Environment.getExternalStorageDirectory() + "/test.flv";
 
-    MatOfByte status;
-    MatOfFloat err;
+    private volatile FFmpegFrameRecorder recorder;
+    boolean recording = false;
+    long startTime = 0;
 
-    int counter = 0;
+    private int sampleAudioRateInHz = 44100;
+    private int imageWidth = 320;
+    private int imageHeight = 240;
+    private int frameRate = 30;
 
+    private Thread audioThread;
+    volatile boolean runAudioThread = true;
+    private AudioRecord audioRecord;
+//    private AudioRecordRunnable audioRecordRunnable;
 
-    private MenuItem mItemPreviewOpticalFlow, mItemPreviewKLT;
+    //private IplImage yuvIplimage = null;
+    private Frame yuvImage;
+
+    private FloatingActionButton btnRecord;
+    private boolean init = false;
 
     private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
         public void onManagerConnected(int status) {
             switch (status) {
                 case LoaderCallbackInterface.SUCCESS: {
-                    Log.i(TAG, "OpenCV loaded successfully");
+                    Log.i(LOG_TAG, "OpenCV loaded successfully");
                     mOpenCvCameraView.enableView();
                 }
                 break;
@@ -70,7 +91,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     };
 
     public MainActivity() {
-        Log.i(TAG, "Instantiated new " + this.getClass());
+        Log.i(LOG_TAG, "Instantiated new " + this.getClass());
     }
 
     /**
@@ -78,16 +99,40 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
      */
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        Log.i(TAG, "called onCreate");
+        Log.i(LOG_TAG, "called onCreate");
         super.onCreate(savedInstanceState);
-//        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-//                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
 
         mOpenCvCameraView = (JavaCameraView) findViewById(R.id.cameraView);
+        btnRecord = findViewById(R.id.btnCapture);
         mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
         mOpenCvCameraView.setCvCameraViewListener(this);
+
+        btnRecord.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!recording) {
+//                    startRecord();
+                    btnRecord.setImageResource(R.drawable.ic_stop);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        DrawableCompat.setTintList(DrawableCompat.wrap(btnRecord.getBackground()), getColorStateList(R.color.colorTrans));
+                    }
+                    Log.w(LOG_TAG, "Start Button Pushed");
+                    recording = true;
+                } else {
+//                    stopRecord();
+                    btnRecord.setImageResource(R.drawable.ic_videocam);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        DrawableCompat.setTintList(DrawableCompat.wrap(btnRecord.getBackground()), getColorStateList(R.color.colorGray));
+                    }
+                    Log.w(LOG_TAG, "Stop Button Pushed");
+                    recording = false;
+                }
+            }
+        });
     }
 
     @Override
@@ -101,10 +146,10 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     public void onResume() {
         super.onResume();
         if (!OpenCVLoader.initDebug()) {
-            Log.d(TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
+            Log.d(LOG_TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
             OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION_3_0_0, this, mLoaderCallback);
         } else {
-            Log.d(TAG, "OpenCV library found inside package. Using it!");
+            Log.d(LOG_TAG, "OpenCV library found inside package. Using it!");
             mLoaderCallback.onManagerConnected(LoaderCallbackInterface.SUCCESS);
         }
     }
@@ -116,124 +161,143 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     }
 
     public void onCameraViewStarted(int width, int height) {
-        mRgba = new Mat(height, width, CvType.CV_8UC4);
-        mIntermediateMat = new Mat(height, width, CvType.CV_8UC4);
-        mGray = new Mat(height, width, CvType.CV_8UC1);
-        resetVars();
+        edgesMat = new Mat(height, width, CvType.CV_8UC4);
     }
 
     public void onCameraViewStopped() {
-        mRgba.release();
-        mGray.release();
-        mIntermediateMat.release();
+        if (edgesMat != null)
+            edgesMat.release();
+
+        edgesMat = null;
     }
 
 
-    public Mat onCameraFrame(CvCameraViewFrame inputFrame) {
-//        final int viewMode = mViewMode;
-//        switch (viewMode) {
-//            case VIEW_MODE_OPTICAL_FLOW:
-                mRgba = inputFrame.rgba();
-
-                if (counter % 2 == 0){
-                    Core.flip(mRgba,mRgba,1);
-                    Imgproc.cvtColor(mRgba,mRgba, Imgproc.COLOR_RGB2GRAY);
-                }
-
-                counter = counter + 1;
-//                src = mGray;
-//                update();
-//                if (features.toArray().length == 0) {
-//                    int rowStep = 50, colStep = 100;
-//                    int nRows = mGray.rows() / rowStep, nCols = mGray.cols() / colStep;
-//
-//                    Point points[] = new Point[nRows * nCols];
-//                    for (int i = 0; i < nRows; i++) {
-//                        for (int j = 0; j < nCols; j++) {
-//                            points[i * nCols + j] = new Point(j * colStep, i * rowStep);
-//                        }
-//                    }
-//                    features.fromArray(points);
-//                    prevFeatures.fromList(features.toList());
-//                    mPrevGray = mGray.clone();
-//                    nextFeatures.fromArray(prevFeatures.toArray());
-//                    Video.calcOpticalFlowPyrLK(mPrevGray, mGray, prevFeatures, nextFeatures, status, err);
-//                    List<Point> prevList = features.toList(), nextList = nextFeatures.toList();
-//
-//                    Scalar color = new Scalar(255);
-//
-//                    for (int i = 0; i < prevList.size(); i++) {
-//                        Imgproc.line(mGray, prevList.get(i), nextList.get(i), color);
-//                        mPrevGray = mGray.clone();
-//
-//                    }
-//                    break;
-//                }
-//            default:
-//                mViewMode = VIEW_MODE_OPTICAL_FLOW;
-//        }
-        return mRgba;
+    public Mat onCameraFrame(CvCameraViewFrame inputFrame){
+        Mat rgba = inputFrame.rgba();
+        return rgba;
     }
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        // Inflate the menu; this adds items to the action bar if it is present.
-        mItemPreviewKLT = menu.add("KLT Tracker");
-        mItemPreviewOpticalFlow = menu.add("Optical Flow");
-        return true;
+/*    private void initRecorder() {
+        Log.w(LOG_TAG,"initRecorder");
+
+
+        // region
+        yuvImage = new Frame(imageWidth, imageHeight, Frame.DEPTH_UBYTE, 2);
+        Log.d(LOG_TAG, "IplImage.create");
+        // endregion
+
+        recorder = new FFmpegFrameRecorder(ffmpeg_link, imageWidth, imageHeight, 1);
+        Log.v(LOG_TAG, "FFmpegFrameRecorder: " + ffmpeg_link + " imageWidth: " + imageWidth + " imageHeight " + imageHeight);
+
+        recorder.setFormat("flv");
+        Log.v(LOG_TAG, "recorder.setFormat(\"flv\")");
+
+        recorder.setSampleRate(sampleAudioRateInHz);
+        Log.v(LOG_TAG, "recorder.setSampleRate(sampleAudioRateInHz)");
+
+        // re-set in the surface changed method as well
+        recorder.setFrameRate(frameRate);
+        Log.v(LOG_TAG, "recorder.setFrameRate(frameRate)");
+
+        // Create audio recording thread
+        audioRecordRunnable = new AudioRecordRunnable();
+        audioThread = new Thread(audioRecordRunnable);
     }
 
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
-        if (item == mItemPreviewOpticalFlow) {
-            mViewMode = VIEW_MODE_OPTICAL_FLOW ;
-            resetVars();
-        } else if (item == mItemPreviewKLT) {
-            mViewMode = VIEW_MODE_KLT_TRACKER;
-            resetVars();
+    // Start the capture
+    public void startRecord() {
+        initRecorder();
+
+        try {
+            recorder.start();
+            startTime = System.currentTimeMillis();
+            recording = true;
+            audioThread.start();
+        } catch (FFmpegFrameRecorder.Exception e) {
+            e.printStackTrace();
         }
-
-        return true;
     }
 
-    private void resetVars() {
-        mPrevGray = new Mat(mGray.rows(), mGray.cols(), CvType.CV_8UC1);
-        features = new MatOfPoint();
-        prevFeatures = new MatOfPoint2f();
-        nextFeatures = new MatOfPoint2f();
-        status = new MatOfByte();
-        err = new MatOfFloat();
+    public void stopRecord() {
+        // This should stop the audio thread from running
+        runAudioThread = false;
+
+        if (recorder != null && recording) {
+            recording = false;
+            Log.v(LOG_TAG,"Finishing recording, calling stop and release on recorder");
+            try {
+                recorder.stop();
+                recorder.release();
+            } catch (FFmpegFrameRecorder.Exception e) {
+                e.printStackTrace();
+            }
+            recorder = null;
+        }
+    }*/
+
+    @Override
+    public void onBackPressed() {
+        super.onBackPressed();
+        if (recording){
+//            stopRecord();
+        }
+        finish();
     }
 
-//    private void update() {
-//        /// Parameters for Shi-Tomasi algorithm
-//        maxCorners = Math.max(maxCorners, 1);
-//        MatOfPoint corners = new MatOfPoint();
-//        double qualityLevel = 0.01;
-//        double minDistance = 10;
-//        int blockSize = 3, gradientSize = 3;
-//        boolean useHarrisDetector = false;
-//        double k = 0.04;
-//
-//        /// Copy the source image
-//        Mat copy = src.clone();
-//
-//        /// Apply corner detection
-//        Imgproc.goodFeaturesToTrack(srcGray, corners, maxCorners, qualityLevel, minDistance, new Mat(),
-//                blockSize, gradientSize, useHarrisDetector, k);
-//
-//        /// Draw corners detected
-//        System.out.println("** Number of corners detected: " + corners.rows());
-//        int[] cornersData = new int[(int) (corners.total() * corners.channels())];
-//        corners.get(0, 0, cornersData);
-//        int radius = 4;
-//        for (int i = 0; i < corners.rows(); i++) {
-//            Imgproc.circle(copy, new Point(cornersData[i * 2], cornersData[i * 2 + 1]), radius,
-//                    new Scalar(rng.nextInt(256), rng.nextInt(256), rng.nextInt(256)), Core.FILLED);
-//        }
-//
-//    }
+    //---------------------------------------------
+    // audio thread, gets and encodes audio data
+    //---------------------------------------------
+/*    class AudioRecordRunnable implements Runnable {
+
+        @Override
+        public void run() {
+            // Set the thread priority
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
+
+            // Audio
+            int bufferSize;
+            short[] audioData;
+            int bufferReadResult;
+
+            bufferSize = AudioRecord.getMinBufferSize(sampleAudioRateInHz,
+                    AudioFormat.CHANNEL_CONFIGURATION_MONO, AudioFormat.ENCODING_PCM_16BIT);
+            audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleAudioRateInHz,
+                    AudioFormat.CHANNEL_CONFIGURATION_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize);
+
+            audioData = new short[bufferSize];
+
+            Log.d(LOG_TAG, "audioRecord.startRecord()");
+            audioRecord.startRecording();
+
+            // Audio Capture/Encoding Loop
+            while (runAudioThread) {
+                // Read from audioRecord
+                bufferReadResult = audioRecord.read(audioData, 0, audioData.length);
+                if (bufferReadResult > 0) {
+                    //Log.v(LOG_TAG,"audioRecord bufferReadResult: " + bufferReadResult);
+
+                    // Changes in this variable may not be picked up despite it being "volatile"
+                    if (recording) {
+                        try {
+                            // Write to FFmpegFrameRecorder
+                            recorder.recordSamples(ShortBuffer.wrap(audioData, 0, bufferReadResult));
+                        } catch (FFmpegFrameRecorder.Exception e) {
+                            Log.e(LOG_TAG, e.getMessage());
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+            Log.v(LOG_TAG,"AudioThread Finished");
+
+            *//* Capture/Encoding finished, release recorder *//*
+            if (audioRecord != null) {
+                audioRecord.stop();
+                audioRecord.release();
+                audioRecord = null;
+                Log.v(LOG_TAG,"audioRecord released");
+            }
+        }
+    }*/
+
 }

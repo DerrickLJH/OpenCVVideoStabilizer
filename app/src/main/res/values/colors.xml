@@ -2,8 +2,10 @@
 <resources>
     <color name="colorPrimary">#008577</color>
     <color name="colorPrimaryDark">#00574B</color>
-    <color name="colorAccent">#D81B60</color>
+    <color name="colorAccent">#EEEEEE</color>
     <color name="colorBlack">#000000</color>
+    <color name="colorGray">#eeeeee</color>
+    <color name="colorTrans">#00000000</color>
     <color name="colorWhite">#FFFFFF</color>
     <color name="rejectedRed">#d50000</color>
     <color name="acceptedGreen">#00c853</color>

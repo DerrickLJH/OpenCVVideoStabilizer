@@ -1,21 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:orientation="horizontal"
     android:layout_width="match_parent"
+    android:layout_height="match_parent"
     android:background="@color/colorBlack"
-    android:layout_height="match_parent" >
+    android:orientation="horizontal">
 
     <org.opencv.android.JavaCameraView
+        android:id="@+id/cameraView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        app:show_fps="true"
         android:layout_gravity="center"
-        app:camera_id="any"
         android:visibility="visible"
-        android:id="@+id/cameraView" />
+        app:camera_id="any"
+        app:show_fps="true" />
 
     <ImageView
         android:id="@+id/ivBitmap"
@@ -27,13 +26,14 @@
         app:layout_constraintRight_toRightOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_alignParentBottom="true"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:layout_alignParentRight="true"
         android:gravity="center"
-        android:layout_marginBottom="25dp">
+        android:layout_marginRight="25dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -41,11 +41,11 @@
             android:gravity="center"
             android:layout_weight="0.3">
             <ImageView
-                android:id="@+id/ivMode"
+                android:id="@+id/ivSwitchCamera"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:clickable="false"
-                android:src="@drawable/ic_camera"/>
+                android:src="@drawable/ic_camera_front"/>
         </LinearLayout>
         <LinearLayout
             android:layout_width="match_parent"
@@ -68,11 +68,11 @@
             android:gravity="center"
             android:layout_weight="0.3">
             <ImageView
-                android:id="@+id/ivSwitchCamera"
+                android:id="@+id/ivMode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:clickable="false"
-                android:src="@drawable/ic_camera_front"/>
+                android:src="@drawable/ic_camera"/>
         </LinearLayout>
     </LinearLayout>
 
@@ -81,9 +81,9 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_alignParentRight="true"
+        android:layout_marginRight="25dp"
         android:gravity="center"
         android:orientation="vertical"
-        android:layout_marginRight="25dp"
         android:visibility="gone"
         android:weightSum="2">
 
@@ -102,10 +102,10 @@
             android:id="@+id/btnReject"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="60dp"
             android:layout_weight="0.5"
             android:src="@drawable/ic_close"
             app:backgroundTint="@color/rejectedRed"
-            android:layout_marginTop="60dp"
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent" />
