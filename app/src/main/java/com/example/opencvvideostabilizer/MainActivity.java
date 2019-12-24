@@ -7,41 +7,36 @@ import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
 import org.opencv.android.JavaCameraView;
 import org.opencv.android.LoaderCallbackInterface;
 import org.opencv.android.OpenCVLoader;
-import org.opencv.core.Core;
+
+import org.opencv.calib3d.Calib3d;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.android.CameraBridgeViewBase;
 import org.opencv.android.CameraBridgeViewBase.CvCameraViewListener2;
+
 import org.opencv.core.MatOfByte;
 import org.opencv.core.MatOfFloat;
 import org.opencv.core.MatOfPoint;
 import org.opencv.core.MatOfPoint2f;
-import org.opencv.core.Point;
 import org.opencv.core.Scalar;
+import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
-import org.opencv.video.SparseOpticalFlow;
 import org.opencv.video.Video;
 
 import android.app.Activity;
-import android.media.AudioFormat;
 import android.media.AudioRecord;
-import android.media.MediaRecorder;
-import android.media.MediaScannerConnection;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.SurfaceHolder;
+
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.ImageView;
 
 import androidx.core.graphics.drawable.DrawableCompat;
 
-import com.google.android.material.floatingactionbutton.FloatingActionButton;;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;;import java.util.ArrayList;
 
 
 public class MainActivity extends Activity implements CvCameraViewListener2 {
@@ -154,6 +149,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         }
     }
 
+
     public void onDestroy() {
         super.onDestroy();
         if (mOpenCvCameraView != null)
@@ -174,7 +170,25 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
     public Mat onCameraFrame(CvCameraViewFrame inputFrame){
         Mat rgba = inputFrame.rgba();
+        MatOfPoint featuresOld = new MatOfPoint();
+        Imgproc.goodFeaturesToTrack(inputFrame.rgba(), featuresOld, 100,0.01,0.1);
+
         return rgba;
+    }
+
+    public Mat stabilizeImage(Mat newFrame, Mat oldFrame, MatOfPoint2f featuresOld){
+        Mat greyNew = new Mat();
+        Mat greyOld = new Mat();
+        Imgproc.cvtColor(newFrame, greyNew, Imgproc.COLOR_BGR2GRAY);
+        Imgproc.cvtColor(oldFrame, greyOld, Imgproc.COLOR_BGR2GRAY);
+        MatOfPoint2f currentFeatures = new MatOfPoint2f();
+        MatOfFloat err = new MatOfFloat();
+        MatOfByte status = new MatOfByte();
+        Video.calcOpticalFlowPyrLK(greyOld, greyNew, featuresOld, currentFeatures, status, err);
+        Mat correctionMatrix = Calib3d.estimateAffine2D(currentFeatures, backgroundFeatures,0);
+        Mat corrected = new Mat();
+        Imgproc.warpAffine(newFrame, corrected, correctionMatrix, newFrame.size());
+        return corrected;
     }
 
 /*    private void initRecorder() {
