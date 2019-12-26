@@ -1,5 +1,6 @@
 package com.example.opencvvideostabilizer;
 
+import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.FFmpegFrameRecorder;
 import org.bytedeco.javacv.Frame;
 import org.opencv.android.BaseLoaderCallback;
@@ -172,11 +173,10 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         Mat rgba = inputFrame.rgba();
         MatOfPoint featuresOld = new MatOfPoint();
         Imgproc.goodFeaturesToTrack(inputFrame.rgba(), featuresOld, 100,0.01,0.1);
-
         return rgba;
     }
 
-    public Mat stabilizeImage(Mat newFrame, Mat oldFrame, MatOfPoint2f featuresOld){
+    /*public Mat stabilizeImage(Mat newFrame, Mat oldFrame, MatOfPoint2f featuresOld){
         Mat greyNew = new Mat();
         Mat greyOld = new Mat();
         Imgproc.cvtColor(newFrame, greyNew, Imgproc.COLOR_BGR2GRAY);
@@ -189,7 +189,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         Mat corrected = new Mat();
         Imgproc.warpAffine(newFrame, corrected, correctionMatrix, newFrame.size());
         return corrected;
-    }
+    }*/
 
 /*    private void initRecorder() {
         Log.w(LOG_TAG,"initRecorder");
@@ -253,7 +253,9 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     public void onBackPressed() {
         super.onBackPressed();
         if (recording){
+
 //            stopRecord();
+
         }
         finish();
     }
