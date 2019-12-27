@@ -1,73 +1,89 @@
 package com.example.opencvvideostabilizer;
 
-import org.bytedeco.javacv.FFmpegFrameGrabber;
-import org.bytedeco.javacv.FFmpegFrameRecorder;
-import org.bytedeco.javacv.Frame;
-import org.opencv.android.BaseLoaderCallback;
-import org.opencv.android.CameraBridgeViewBase.CvCameraViewFrame;
-import org.opencv.android.JavaCameraView;
-import org.opencv.android.LoaderCallbackInterface;
-import org.opencv.android.OpenCVLoader;
 
-import org.opencv.calib3d.Calib3d;
-import org.opencv.core.CvType;
-import org.opencv.core.Mat;
-import org.opencv.android.CameraBridgeViewBase;
-import org.opencv.android.CameraBridgeViewBase.CvCameraViewListener2;
-
-import org.opencv.core.MatOfByte;
-import org.opencv.core.MatOfFloat;
-import org.opencv.core.MatOfPoint;
-import org.opencv.core.MatOfPoint2f;
-import org.opencv.core.Scalar;
-import org.opencv.imgcodecs.Imgcodecs;
-import org.opencv.imgproc.Imgproc;
-import org.opencv.video.Video;
-
+import android.Manifest;
 import android.app.Activity;
+import android.content.pm.PackageManager;
+import android.media.AudioFormat;
 import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.media.MediaScannerConnection;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
-
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.Toast;
 
+import androidx.annotation.NonNull;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.core.content.PermissionChecker;
 import androidx.core.graphics.drawable.DrawableCompat;
 
-import com.google.android.material.floatingactionbutton.FloatingActionButton;;import java.util.ArrayList;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
+import org.bytedeco.javacv.FFmpegFrameRecorder;
+import org.bytedeco.javacv.Frame;
+import org.bytedeco.javacv.OpenCVFrameConverter;
+import org.bytedeco.opencv.opencv_core.IplImage;
+import org.opencv.android.BaseLoaderCallback;
+import org.opencv.android.CameraBridgeViewBase;
+import org.opencv.android.JavaCameraView;
+import org.opencv.android.LoaderCallbackInterface;
+import org.opencv.android.OpenCVLoader;
+import org.opencv.calib3d.Calib3d;
+import org.opencv.core.CvType;
+import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
+import org.opencv.core.MatOfFloat;
+import org.opencv.core.MatOfPoint2f;
+import org.opencv.imgproc.Imgproc;
+import org.opencv.video.Video;
 
-public class MainActivity extends Activity implements CvCameraViewListener2 {
+import java.io.File;
+import java.io.IOException;
+import java.nio.ShortBuffer;
+
+import static org.bytedeco.opencv.global.opencv_core.IPL_DEPTH_8U;
+
+public class MainActivity extends Activity implements CameraBridgeViewBase.CvCameraViewListener2 {
     private static final String LOG_TAG = "MainActivity";
+    final int RECORD_LENGTH = 10;
 
     private CameraBridgeViewBase mOpenCvCameraView;
     private Mat edgesMat;
-    private final Scalar greenScalar = new Scalar(0,255,0);
+    private FloatingActionButton btnRecord;
+    private Frame yuvImage;
+    private int resolutionIndex = 0;
 
-    private String ffmpeg_link = Environment.getExternalStorageDirectory() + "/test.flv";
+    private IplImage videoImage = null;
 
-    private volatile FFmpegFrameRecorder recorder;
     boolean recording = false;
-    long startTime = 0;
+    private volatile FFmpegFrameRecorder recorder;
+    Frame[] images;
+    long[] timestamps;
+    ShortBuffer[] samples;
+    int imagesIndex, samplesIndex;
 
     private int sampleAudioRateInHz = 44100;
-    private int imageWidth = 320;
-    private int imageHeight = 240;
+    // private int imageWidth = 480;
+    // private int imageHeight = 320;
+    private int imageWidth = 480;
+    private int imageHeight = 320;
     private int frameRate = 30;
-
+    private int IplImageChannel = 4;
+    private String RECIEVE_BYTE_BUFFER = "";
     private Thread audioThread;
     volatile boolean runAudioThread = true;
     private AudioRecord audioRecord;
-//    private AudioRecordRunnable audioRecordRunnable;
+    private AudioRecordRunnable audioRecordRunnable;
 
-    //private IplImage yuvIplimage = null;
-    private Frame yuvImage;
+    private String ffmpeg_link;
 
-    private FloatingActionButton btnRecord;
-    private boolean init = false;
+    long startTime = 0;
 
     private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
@@ -102,6 +118,13 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setContentView(R.layout.activity_main);
 
+        if (checkPermission()) {
+
+        } else {
+            ActivityCompat.requestPermissions(MainActivity.this,
+                    new String[]{Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.RECORD_AUDIO}, 1234);
+        }
+
         mOpenCvCameraView = (JavaCameraView) findViewById(R.id.cameraView);
         btnRecord = findViewById(R.id.btnCapture);
         mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
@@ -111,20 +134,20 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
             @Override
             public void onClick(View v) {
                 if (!recording) {
-//                    startRecord();
                     btnRecord.setImageResource(R.drawable.ic_stop);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         DrawableCompat.setTintList(DrawableCompat.wrap(btnRecord.getBackground()), getColorStateList(R.color.colorTrans));
                     }
                     Log.w(LOG_TAG, "Start Button Pushed");
+                    startRecording(v);
                     recording = true;
                 } else {
-//                    stopRecord();
                     btnRecord.setImageResource(R.drawable.ic_videocam);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         DrawableCompat.setTintList(DrawableCompat.wrap(btnRecord.getBackground()), getColorStateList(R.color.colorGray));
                     }
                     Log.w(LOG_TAG, "Stop Button Pushed");
+                    stopRecording();
                     recording = false;
                 }
             }
@@ -169,14 +192,66 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     }
 
 
-    public Mat onCameraFrame(CvCameraViewFrame inputFrame){
+    public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame){
         Mat rgba = inputFrame.rgba();
-        MatOfPoint featuresOld = new MatOfPoint();
-        Imgproc.goodFeaturesToTrack(inputFrame.rgba(), featuresOld, 100,0.01,0.1);
+/*        MatOfPoint featuresOld = new MatOfPoint();
+        Imgproc.goodFeaturesToTrack(inputFrame.gray(), featuresOld, 100, 0.01, 0.1);
+        Mat corrected = stabilizeImage(rgba, inputFrame.rgba(), new MatOfPoint2f(featuresOld.toArray()));*/
+        if (recording) {
+            byte[] byteFrame = new byte[(int) (rgba.total() * rgba.channels())];
+            rgba.get(0, 0, byteFrame);
+            onFrame(byteFrame);
+        }
         return rgba;
     }
 
-    /*public Mat stabilizeImage(Mat newFrame, Mat oldFrame, MatOfPoint2f featuresOld){
+    int frames = 0;
+
+    private void onFrame(byte[] data) {
+
+        Log.e("", "data frame::" + data.length);
+
+        if (videoImage != null && recording) {
+            long videoTimestamp = 1000 * (System.currentTimeMillis() - startTime);
+            // Put the camera preview frame right into the yuvIplimage object
+            // videoImage.getByteBuffer().put(data);
+
+            // byte[] byteData = new byte[1024];
+            // for (int i = 0; i < byteData.length; i++) {
+            // byteData[i] = data[i];
+            // }
+            // videoImage.getByteBuffer().put(byteData);
+            videoImage.getByteBuffer().put(data);
+
+            // videoImage = IplImage.createFrom(data);
+            // videoImage = cvDecodeImage(cvMat(1, data.length, CV_8UC1,
+            // new BytePointer(data)));
+            try {
+
+                if (recorder != null) {
+                    // Get the correct time
+                    recorder.setTimestamp(videoTimestamp);
+
+                    // Record the image into FFmpegFrameRecorder
+                    // recorder.record(videoImage);
+                    OpenCVFrameConverter.ToIplImage iplImageConverter = new OpenCVFrameConverter.ToIplImage();
+                    Frame videoFrame = iplImageConverter.convert(videoImage);
+                    recorder.record(videoFrame);
+
+                    frames++;
+
+                    Log.i(LOG_TAG, "Wrote Frame: " + frames);
+                }
+
+            } catch (FFmpegFrameRecorder.Exception e) {
+                Log.v(LOG_TAG, e.getMessage());
+                e.printStackTrace();
+            }
+        }
+
+    }
+
+    public Mat stabilizeImage(Mat newFrame, Mat oldFrame, MatOfPoint2f featuresOld) {
         Mat greyNew = new Mat();
         Mat greyOld = new Mat();
         Imgproc.cvtColor(newFrame, greyNew, Imgproc.COLOR_BGR2GRAY);
@@ -185,26 +260,56 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         MatOfFloat err = new MatOfFloat();
         MatOfByte status = new MatOfByte();
         Video.calcOpticalFlowPyrLK(greyOld, greyNew, featuresOld, currentFeatures, status, err);
-        Mat correctionMatrix = Calib3d.estimateAffine2D(currentFeatures, backgroundFeatures,0);
+        Mat correctionMatrix = Calib3d.estimateAffine2D(currentFeatures, featuresOld);
         Mat corrected = new Mat();
         Imgproc.warpAffine(newFrame, corrected, correctionMatrix, newFrame.size());
         return corrected;
-    }*/
+    }
 
-/*    private void initRecorder() {
-        Log.w(LOG_TAG,"initRecorder");
+    private void initRecorder() {
+        Log.w(LOG_TAG, "initRecorder");
 
+        // int depth = com.googlecode.javacv.cpp.opencv_core.IPL_DEPTH_8U;
 
-        // region
-        yuvImage = new Frame(imageWidth, imageHeight, Frame.DEPTH_UBYTE, 2);
-        Log.d(LOG_TAG, "IplImage.create");
-        // endregion
+        // if (yuvIplimage == null) {
+        // Recreated after frame size is set in surface change method
+        // videoImage = IplImage.create(imageWidth, imageHeight, depth,
+        // channels);
+        // yuvIplimage = IplImage
+        // .create(imageWidth, imageHeight, IPL_DEPTH_32S, 2);
+        // videoImage = IplImage.create(imageWidth, imageHeight, IPL_DEPTH_8U,
+        // 2);
+//		 videoImage = IplImage.create(1280, 720, IPL_DEPTH_8U,
+//		 IplImageChannel);
+		videoImage = IplImage.create(720, 1280, IPL_DEPTH_8U, IplImageChannel);
+//        videoImage = IplImage.create(720, 1280, IPL_DEPTH_8U, 2);
 
-        recorder = new FFmpegFrameRecorder(ffmpeg_link, imageWidth, imageHeight, 1);
-        Log.v(LOG_TAG, "FFmpegFrameRecorder: " + ffmpeg_link + " imageWidth: " + imageWidth + " imageHeight " + imageHeight);
+        Log.v(LOG_TAG, "IplImage.create");
+        // }
 
-        recorder.setFormat("flv");
-        Log.v(LOG_TAG, "recorder.setFormat(\"flv\")");
+        File videoFile = new File(Environment.getExternalStorageDirectory(), "video.mp4");
+        boolean mk = videoFile.getParentFile().mkdirs();
+        Log.v(LOG_TAG, "Mkdir: " + mk);
+
+        boolean del = videoFile.delete();
+        Log.v(LOG_TAG, "del: " + del);
+
+        try {
+            boolean created = videoFile.createNewFile();
+            Log.v(LOG_TAG, "Created: " + created);
+        } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+
+        ffmpeg_link = videoFile.getAbsolutePath();
+        recorder = new FFmpegFrameRecorder(ffmpeg_link, imageWidth,
+                imageHeight, 1);
+        Log.v(LOG_TAG, "FFmpegFrameRecorder: " + ffmpeg_link + " imageWidth: "
+                + imageWidth + " imageHeight " + imageHeight);
+
+        recorder.setFormat("mp4");
+        Log.v(LOG_TAG, "recorder.setFormat(\"mp4\")");
 
         recorder.setSampleRate(sampleAudioRateInHz);
         Log.v(LOG_TAG, "recorder.setSampleRate(sampleAudioRateInHz)");
@@ -212,6 +317,9 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         // re-set in the surface changed method as well
         recorder.setFrameRate(frameRate);
         Log.v(LOG_TAG, "recorder.setFrameRate(frameRate)");
+        recorder.setVideoCodec(13);
+        recorder.setVideoQuality(1.0D);
+        // recorder.setVideoBitrate(40000);
 
         // Create audio recording thread
         audioRecordRunnable = new AudioRecordRunnable();
@@ -219,101 +327,150 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     }
 
     // Start the capture
-    public void startRecord() {
+    public void startRecording(View v) {
         initRecorder();
+        recording = !recording;
 
-        try {
-            recorder.start();
+        Log.i(LOG_TAG, "Recording: " + recording);
+
+        if (recording) {
             startTime = System.currentTimeMillis();
-            recording = true;
-            audioThread.start();
-        } catch (FFmpegFrameRecorder.Exception e) {
-            e.printStackTrace();
+            try {
+                recorder.start();
+
+                Log.i(LOG_TAG, "STARTED RECORDING.");
+
+            } catch (Exception e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        } else {
+            stopRecording();
         }
     }
 
-    public void stopRecord() {
+
+    public void stopRecording() {
         // This should stop the audio thread from running
         runAudioThread = false;
 
-        if (recorder != null && recording) {
-            recording = false;
-            Log.v(LOG_TAG,"Finishing recording, calling stop and release on recorder");
+        if (recorder != null) {
+            Log.v(LOG_TAG,
+                    "Finishing recording, calling stop and release on recorder");
             try {
                 recorder.stop();
                 recorder.release();
+
             } catch (FFmpegFrameRecorder.Exception e) {
                 e.printStackTrace();
             }
+            Toast.makeText(MainActivity.this,
+                    "saved ffmpeg_link::" + ffmpeg_link, Toast.LENGTH_SHORT)
+                    .show();
             recorder = null;
+            recording = false;
         }
-    }*/
 
-    @Override
-    public void onBackPressed() {
-        super.onBackPressed();
-        if (recording){
-
-//            stopRecord();
-
-        }
-        finish();
+        MediaScannerConnection.scanFile(MainActivity.this,
+                new String[] { ffmpeg_link }, null, null);
     }
+
 
     //---------------------------------------------
     // audio thread, gets and encodes audio data
     //---------------------------------------------
-/*    class AudioRecordRunnable implements Runnable {
+    class AudioRecordRunnable implements Runnable {
 
         @Override
         public void run() {
-            // Set the thread priority
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
 
             // Audio
             int bufferSize;
-            short[] audioData;
+            ShortBuffer audioData;
             int bufferReadResult;
 
             bufferSize = AudioRecord.getMinBufferSize(sampleAudioRateInHz,
-                    AudioFormat.CHANNEL_CONFIGURATION_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             audioRecord = new AudioRecord(MediaRecorder.AudioSource.MIC, sampleAudioRateInHz,
-                    AudioFormat.CHANNEL_CONFIGURATION_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize);
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize);
 
-            audioData = new short[bufferSize];
+            if (RECORD_LENGTH > 0) {
+                samplesIndex = 0;
+                samples = new ShortBuffer[RECORD_LENGTH * sampleAudioRateInHz * 2 / bufferSize + 1];
+                for (int i = 0; i < samples.length; i++) {
+                    samples[i] = ShortBuffer.allocate(bufferSize);
+                }
+            } else {
+                audioData = ShortBuffer.allocate(bufferSize);
+            }
 
-            Log.d(LOG_TAG, "audioRecord.startRecord()");
+            Log.d(LOG_TAG, "audioRecord.startRecording()");
             audioRecord.startRecording();
 
-            // Audio Capture/Encoding Loop
+            /* ffmpeg_audio encoding loop */
             while (runAudioThread) {
-                // Read from audioRecord
-                bufferReadResult = audioRecord.read(audioData, 0, audioData.length);
+                if (RECORD_LENGTH > 0) {
+                    audioData = samples[samplesIndex++ % samples.length];
+                    audioData.position(0).limit(0);
+                }
+                //Log.v(LOG_TAG,"recording? " + recording);
+                bufferReadResult = audioRecord.read(audioData.array(), 0, audioData.capacity());
+                audioData.limit(bufferReadResult);
                 if (bufferReadResult > 0) {
-                    //Log.v(LOG_TAG,"audioRecord bufferReadResult: " + bufferReadResult);
-
-                    // Changes in this variable may not be picked up despite it being "volatile"
+                    Log.v(LOG_TAG, "bufferReadResult: " + bufferReadResult);
+                    // If "recording" isn't true when start this thread, it never get's set according to this if statement...!!!
+                    // Why?  Good question...
                     if (recording) {
-                        try {
-                            // Write to FFmpegFrameRecorder
-                            recorder.recordSamples(ShortBuffer.wrap(audioData, 0, bufferReadResult));
-                        } catch (FFmpegFrameRecorder.Exception e) {
-                            Log.e(LOG_TAG, e.getMessage());
-                            e.printStackTrace();
+                        if (RECORD_LENGTH <= 0) {
+                            try {
+                                recorder.recordSamples(audioData);
+                                //Log.v(LOG_TAG,"recording " + 1024*i + " to " + 1024*i+1024);
+                            } catch (FFmpegFrameRecorder.Exception e) {
+                                Log.v(LOG_TAG, e.getMessage());
+                                e.printStackTrace();
+                            }
                         }
                     }
                 }
             }
-            Log.v(LOG_TAG,"AudioThread Finished");
+            Log.v(LOG_TAG, "AudioThread Finished, release audioRecord");
 
-            *//* Capture/Encoding finished, release recorder *//*
+            /* encoding finish, release recorder */
             if (audioRecord != null) {
                 audioRecord.stop();
                 audioRecord.release();
                 audioRecord = null;
-                Log.v(LOG_TAG,"audioRecord released");
+                Log.v(LOG_TAG, "audioRecord released");
             }
         }
-    }*/
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        switch (requestCode) {
+            case 1234: {
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED && grantResults[1] == PackageManager.PERMISSION_GRANTED && grantResults[2] == PackageManager.PERMISSION_GRANTED) {
+                } else {
+                    Toast.makeText(MainActivity.this, "Permission not granted", Toast.LENGTH_SHORT).show();
+                    finish();
+                }
+            }
+        }
+    }
+
+    private boolean checkPermission() {
+        int permissionCheck_Record = ContextCompat.checkSelfPermission(MainActivity.this,
+                Manifest.permission.RECORD_AUDIO);
+        int permissionCheck_Cam = ContextCompat.checkSelfPermission(MainActivity.this,
+                Manifest.permission.CAMERA);
+        int permissionCheck_Write = ContextCompat.checkSelfPermission(MainActivity.this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        if (permissionCheck_Cam == PermissionChecker.PERMISSION_GRANTED && permissionCheck_Record == PermissionChecker.PERMISSION_GRANTED && permissionCheck_Write == PermissionChecker.PERMISSION_GRANTED) {
+            return true;
+        } else {
+            return false;
+        }
+    }
 
 }
